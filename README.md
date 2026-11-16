@@ -1,10 +1,6 @@
 <div align="center">
 
-<img src="public/favicon.svg" width="72" alt="Chiguru logo" />
-
-# Chiguru · Smart Krishi
-
-**A voice-first farm assistant that speaks the farmer's language.**
+<img src="docs/images/banner.svg" width="100%" alt="Chiguru · Smart Krishi: a tractor drives across a farm while a farmer asks the voice kiosk 'When should I water?' in English, Kannada and Hindi" />
 
 Hold a button, ask about your crop in Kannada, Hindi or English, and hear a grounded answer
 in the same language, using live soil readings from your own field.
@@ -19,8 +15,6 @@ in the same language, using live soil readings from your own field.
 
 </div>
 
-![Chiguru landing page, hero section](docs/images/screenshots/01-hero.jpg)
-
 > **Chiguru** (ಚಿಗುರು) means *a new sprout* in Kannada. **Smart Krishi** (ಕೃಷಿ, *farming*) is the
 > voice kiosk inside it. This repository holds the whole project: the 3D landing page, the
 > ESP32 kiosk firmware, the PC bridge and the AI server.
@@ -30,7 +24,6 @@ in the same language, using live soil readings from your own field.
 - [Problem statement](#problem-statement)
 - [Our solution](#our-solution)
 - [The hardware](#the-hardware)
-- [Screenshots](#screenshots)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Why the answers can be trusted](#why-the-answers-can-be-trusted)
@@ -90,20 +83,6 @@ looks dry, the fertilizer bag is open. The tools they have today fall short in f
   </tr>
 </table>
 
-## Screenshots
-
-The landing page is one continuous camera flight through a 3D farm. Each section of the page
-moves the camera to a new part of the farm.
-
-| | |
-|---|---|
-| ![Your land section](docs/images/screenshots/02-your-land.jpg) | ![Ask Chiguru section](docs/images/screenshots/03-ask-chiguru.jpg) |
-| **01 · Your Land.** Crop cards in Hindi, Kannada and Telugu over the wheat field. | **02 · Ask Chiguru.** Voice features beside the pasture and grazing cows. |
-| ![Device section](docs/images/screenshots/04-device.jpg) | ![Impact section](docs/images/screenshots/05-impact.jpg) |
-| **03 · The Device.** Sensor beacons and a holographic field scan over the crop rows, with labels in Tamil, Telugu and Bengali. | **04 · Impact.** Key numbers over the valley and the windmill. |
-| ![Contact section](docs/images/screenshots/06-contact.jpg) | <img src="docs/images/screenshots/07-mobile.jpg" alt="Mobile view of the hero" width="260" /> |
-| **05 · Contact.** The camera rises toward the mountains and the sun. | **Mobile.** The same scene adapts to a phone, with quality tuned to the device. |
-
 ## Features
 
 **Voice kiosk (`firmware/`, `krishi_client.py`)**
@@ -136,13 +115,95 @@ moves the camera to a new part of the farm.
 - GSAP + Lenis scroll choreography, with floating glass cards tied to each section.
 - Automatic quality tiers (GPU, memory, touch, screen size), adaptive resolution, `prefers-reduced-motion` support, and a painted fallback when WebGL is unavailable.
 
-## Architecture
+<p align="center">
+  <img src="docs/images/screenshots/01-hero.jpg" width="720" alt="Chiguru landing page: the 3D farm hero section" />
+</p>
 
-![Chiguru · Smart Krishi system architecture](docs/images/architecture.svg)
+## Architecture
 
 The ESP32 listens, shows and speaks. The PC does the recognition and the thinking. They talk over
 the USB cable the board is flashed through, so there are no Wi-Fi credentials, IP addresses or
-firewall rules on the critical path.
+firewall rules on the critical path. The sensor node posts its readings to the server over HTTP.
+
+```mermaid
+flowchart LR
+    farmer(["Farmer"])
+
+    subgraph farm["On the farm"]
+        kiosk["Voice kiosk<br/>ESP32 · firmware/<br/>talk button · INMP441 mic<br/>MAX98357A speaker · touch TFT"]
+        sensornode["Sensor node<br/>Arduino UNO Q · unoq/<br/>DHT11 · soil moisture · MQ-135"]
+    end
+
+    subgraph pc["PC · edge server"]
+        bridge["krishi_client.py<br/>USB serial bridge<br/>kiosk_text.py draws Kannada<br/>and Hindi text as bitmaps"]
+        subgraph api["FastAPI · server/app.py · port 8001"]
+            speech["speech.py<br/>speech-to-text · text-to-speech<br/>16 kHz PCM"]
+            lang["language.py<br/>Kannada / Hindi ⇄ English"]
+            router{{"answer_question()<br/>routes every question"}}
+            rag["rag.py<br/>Gemini embeddings + TF-IDF"]
+            llm["llm.py<br/>Gemma 4, or Ollama offline"]
+            grounding["grounding.py<br/>every sentence and number<br/>must be in the sources"]
+            livedata["sensors.py · weather.py<br/>prices.py · fertilizer.py"]
+        end
+        kb[("kb/<br/>14 Markdown files")]
+    end
+
+    subgraph cloud["Cloud APIs"]
+        sarvam["Sarvam AI<br/>saaras:v4 STT + translation"]
+        google["Google AI Studio<br/>Gemma 4 · Gemini"]
+        tts["Microsoft edge-tts"]
+        opendata["OpenWeatherMap<br/>AGMARKNET · data.gov.in"]
+    end
+
+    farmer -- "holds the button, asks" --> kiosk
+    kiosk -- "speaks the answer" --> farmer
+    kiosk <== "USB serial · 921600 baud<br/>mic audio up, text + speech down" ==> bridge
+    sensornode -- "POST /api/krishi/sensors<br/>with a device token" --> livedata
+    bridge <-- "/transcribe · /chat · /audio" --> speech
+    speech --> lang --> router
+    router --> rag --> kb
+    router --> livedata
+    router --> llm --> grounding
+    speech <-.-> sarvam
+    speech -.-> tts
+    lang <-.-> sarvam
+    rag -.-> google
+    llm -.-> google
+    livedata -.-> opendata
+```
+
+| Part | Runs on | Job |
+|---|---|---|
+| Voice kiosk | ESP32 DevKit | Push-to-talk recording, the TFT screens, playing the spoken answer |
+| Sensor node | Arduino UNO Q | Reads air temperature, humidity and soil moisture and posts them to the server |
+| `krishi_client.py` | PC | Bridges the kiosk's USB serial link to the server's HTTP API |
+| FastAPI server | PC | Speech, translation, retrieval, Gemma, the grounding check, live data |
+| Cloud APIs | Internet | Sarvam (speech + translation), Google AI Studio (Gemma 4, Gemini), edge-tts, OpenWeatherMap, AGMARKNET |
+
+### How the server picks an answer
+
+```mermaid
+flowchart TD
+    q(["Question, in English"]) --> greet{"Greeting or thanks?"}
+    greet -- yes --> hello["Short friendly reply"]
+    greet -- no --> search["Retrieve kb chunks<br/>embeddings + TF-IDF<br/>short follow-ups reuse the last topic"]
+    search --> price{"Market price<br/>question?"}
+    price -- yes --> agm{"AGMARKNET has<br/>today's price?"}
+    agm -- no --> web["Gemini + Google Search<br/>via: price-web or no-price"]
+    agm -- yes --> live
+    price -- no --> field{"Weather or<br/>field question?"}
+    field -- yes --> live["LIVE section in the prompt<br/>prices · forecast · sensor reading<br/>marked STALE / OFFLINE / TEST DATA"]
+    field -- no --> rel{"Relevant kb<br/>chunks found?"}
+    live --> gemma
+    rel -- yes --> gemma["Gemma 4 answers<br/>from the context only"]
+    rel -- no --> general
+    gemma -- "NOT_IN_KB" --> general
+    gemma --> check{"Every sentence and number<br/>found in the sources?"}
+    check -- yes --> ok["Grounded answer with sources<br/>via: gemma<br/>plus a safety line on fertilizer answers"]
+    check -- no --> general["Gemini general knowledge<br/>farming only, no quantities<br/>via: general or not-farming"]
+    general -- "cannot answer" --> unknown["Honest I don't know,<br/>ask the agriculture officer or KVK<br/>via: unknown or ungrounded"]
+    gemma -. "Gemma unreachable" .-> direct["kb sentences read verbatim<br/>via: kb-direct"]
+```
 
 ### One question, end to end
 
@@ -478,9 +539,6 @@ readability, latency and RAGAS-style answer quality on the live system.
 
 - **Yadava H C**: Chiguru landing page and 3D scene
 - **[Pavan Kumar H](https://github.com/Pavankumarh0)**: Smart Krishi kiosk, firmware and AI server
-
-The kiosk is built on the team's earlier **Campus Mithra** voice kiosk: the same board, wiring,
-USB protocol and server pipeline, pointed at agriculture.
 
 ## Credits and licences
 
