@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/banner.svg" width="100%" alt="Chiguru · Smart Krishi: a tractor drives across a farm while a farmer asks the voice kiosk 'When should I water?' in English, Kannada and Hindi" />
+<img src="docs/images/hero.webp" width="100%" alt="Chiguru · Smart Krishi: a farmer tilling his field with a red tractor" />
 
 Hold a button, ask about your crop in Kannada, Hindi or English, and hear a grounded answer
 in the same language, using live soil readings from your own field.
